@@ -30,7 +30,7 @@ def get_revenues():
             and lc.disableRow = 0
             and lg.businessId = 1                 --Сильпо
             and lg.commodityGroupId in (5550499, 5550053, 5550017, 5550022, 
-            5550150, 5550120, 5550151, 5550118, 5550015, 5550050, 5550077)
+            5550150, 5550120, 5550151, 5550118,  5550050, 5550077, 5550015)
         )
 
         select	
@@ -41,7 +41,7 @@ def get_revenues():
         from Cheques.dbo.view_ChequeLines cl with (nolock)
             join Lagers l
                 on l.LagerId = cl.LagerID
-        where created between '20210308' and  '20210312'--cast(getdate()-1 as date) 
+        where created between '20210308' and cast(getdate()-1 as date) 
             and filid in (	
                 2382, 2129, 2236, 2251, 2085, 2056, 2045, 2025, 1934,
                 1995, 2042, 2145, 2183, 2173, 2197, 2009, 2132, 2071, 2051, 2275, 2121,

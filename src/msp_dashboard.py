@@ -15,11 +15,14 @@ import xlrd
 # Список филиалов на которых проводился пилот
 pg_filials = [1934, 2022, 2031, 2069, 2112, 2120, 2131, 2254, 2382, 2028, 1999]
 commodity_groups = [5550499, 5550053, 5550017, 5550022, 5550150, 5550120,
-                    5550151, 5550118, 5550050, 5550077]
+                    5550151, 5550118, 5550050, 5550077, 5550015]
 
 # Выгрузка данных по чекам за период
-# sales = pd.read_sql_query(conn.get_revenues(), conn.engine)
-sales = pd.read_csv('sales_5550499_commodity_group.csv')
+print('1 of 5. Start load revenues')
+sales = pd.read_sql_query(conn.get_revenues(), conn.engine)
+# sales = pd.read_csv('sales_5550499_commodity_group.csv')
+# print(sales['createddate'].unique())
+print('2 of 5. End load revenues')
 
 data_for_all_filials = sales.copy(deep=True)
 data_for_all_filials['createddate'] = pd.to_datetime(
@@ -30,8 +33,6 @@ pilot = data_for_all_filials[data_for_all_filials['createddate'] >= start_pilot]
 
 end_pilot = pilot.createddate.max()
 time_series_pilot = pilot.groupby(['filid', 'createddate']).sum()
-
-# print(time_series_pilot.loc[1934]['sum_revenues'])
 
 filials = np.unique(data_for_all_filials.filid)
 candidate_for_cg_filials = filials[~np.isin(filials, pg_filials)]
@@ -49,6 +50,7 @@ for filid in filials:
     time_series_pivoted.loc[filid, 'dates_pilot'] = np.array(y.index)
 
 # Подготавливаем датафреймы
+print('3 of 5. Data processing')
 result_tg_fil = pd.DataFrame(
     columns=['commodityGroupId', 'Filid', 'EffectValue', 'DecisionValue',
              'modifiedDate'])
@@ -83,7 +85,7 @@ for tg in commodity_groups:
         pg_daily_revenues.append(pg_pilot)
         cg_daily_revenues.append(cg_pilot)
 
-        # Подсчет эффекта и статистического решения
+        # Подсчет эффекта и статистического решения на уровне ТГ-Филиал
         effect = (pg_pilot.sum() / cg_pilot.sum()) - 1
         _, p_value = mannwhitneyu(cg_pilot, pg_pilot,
                                   use_continuity=False, alternative='greater')
@@ -95,10 +97,7 @@ for tg in commodity_groups:
                                              verify_integrity=False,
                                              sort=None)
 
-print(result_tg_fil)
-# print(df.iloc[:1])
-
-# Цикл эффекта на уровне ТГ
+# Эффект на уровне ТГ
 for tg in commodity_groups:
     weights_commodity_group = weights[weights.commodity_group == tg].fillna(
         0).to_dict()
@@ -123,7 +122,7 @@ for tg in commodity_groups:
     pg_daily_revenues = np.array(pg_daily_revenues).flatten()
     cg_daily_revenues = np.array(cg_daily_revenues).flatten()
 
-    # Подсчет эффекта и статистического решения
+    # Подсчет эффекта и статистического решения на уровне ТГ
     effect = (pg_daily_revenues.sum() / cg_daily_revenues.sum()) - 1
     _, p_value = mannwhitneyu(cg_daily_revenues, pg_daily_revenues,
                               use_continuity=False, alternative='greater')
@@ -134,8 +133,6 @@ for tg in commodity_groups:
     result_tg = result_tg.append(df, ignore_index=True, verify_integrity=False,
                                  sort=None)
 
-print(result_tg)
-
 # Эффект на уровне всех ТГ
 pg_total_revenues = []
 cg_total_revenues = []
@@ -145,7 +142,6 @@ for tg in commodity_groups:
         0).to_dict()
 
     # Подсчет выручек для синтетических контрольных магазинов
-
     pg_daily_revenues = []
     cg_daily_revenues = []
 
@@ -168,7 +164,7 @@ for tg in commodity_groups:
 pg_total_revenues = np.array(pg_total_revenues).flatten()
 cg_total_revenues = np.array(cg_total_revenues).flatten()
 
-# Подсчет эффекта и статистического решения
+# Подсчет эффекта и статистического решения на уровне всех ТГ
 effect = (pg_total_revenues.sum() / cg_total_revenues.sum()) - 1
 _, p_value = mannwhitneyu(cg_total_revenues, pg_total_revenues,
                           use_continuity=False, alternative='greater')
@@ -177,4 +173,26 @@ result_total = pd.DataFrame([[effect, p_value, date.today()]],
                             columns=['EffectValue', 'DecisionValue',
                                      'modifiedDate'])
 
-print(result_total)
+# print(df.iloc[:1])
+#
+# print(result_tg_fil)
+# print(result_tg)
+# print(result_total)
+
+result_tg_fil_name = 'VZ_MSP_Dashboard_CommodityGroupFilial'
+result_tg_name = 'VZ_MSP_Dashboard_CommodityGroup'
+result_total_name = 'VZ_MSP_Dashboard_Total'
+
+
+print('4 of 5. Load data to server')
+result_tg_fil.to_sql(name=result_tg_fil_name, con=conn.engine,
+                     if_exists='append', index=False,
+                     schema='dbo')
+result_tg.to_sql(name=result_tg_name, con=conn.engine, if_exists='append',
+                 index=False,
+                 schema='dbo')
+
+result_total.to_sql(name=result_total_name, con=conn.engine, if_exists='append',
+                    index=False,
+                    schema='dbo')
+print('5 of 5. End scripts')
