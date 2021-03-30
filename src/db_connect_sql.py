@@ -6,16 +6,24 @@ Contact : v@zubr.kiev.ua
 Time    : 25.03.2021 16:27
 """
 import sqlalchemy as sql
+import pyodbc
 
 server = 'S-KV-CENTER-S64'
 driver = 'SQL+Server'
 db = 'PlanRC'
 engine = sql.create_engine('mssql+pyodbc://{}/{}?driver={}'.format(server, db, driver))
+connection = engine.raw_connection()
+cursor = connection.cursor()
+
 
 def get_revenues():
     query = '''
 
-        with Lagers as (
+
+        declare @Today date = getdate()
+        declare @Monday date = (select dateadd(day, 1-datepart(weekday, @Today), @Today))
+
+        ;with Lagers as (
         select 
                 lagerId
             ,	lc.lagerSapClassifierId
@@ -36,12 +44,13 @@ def get_revenues():
         select	
                 filid
             ,	createddate
+            ,   commodityGroupId
             ,	sum_revenues	=	sum(priceout*kolvo)
             ,	sum_kolvo		=	sum(kolvo)
         from Cheques.dbo.view_ChequeLines cl with (nolock)
             join Lagers l
                 on l.LagerId = cl.LagerID
-        where created between '20210308' and cast(getdate()-1 as date) 
+        where created between '20210308' and @Monday 
             and filid in (	
                 2382, 2129, 2236, 2251, 2085, 2056, 2045, 2025, 1934,
                 1995, 2042, 2145, 2183, 2173, 2197, 2009, 2132, 2071, 2051, 2275, 2121,
@@ -57,8 +66,29 @@ def get_revenues():
                 2201, 2157, 2170, 2194, 2171, 2158, 2147, 2213, 2148, 2155, 2152, 2199, 2215, 2276, 2212, 2274, 2243, 2150, 2280, 2264,
                 2072, 2033, 2229
             )
-        group by FilID, CreatedDate
+        group by FilID, CreatedDate, commodityGroupId
 
            '''
     return query
+
+
+def if_exists():
+    query = '''
+
+        declare @Today date = getdate()
+        declare @Monday date = (select dateadd(day, 1-datepart(weekday, @Today), @Today))
+
+        delete from PlanRC.dbo.VZ_MSP_Dashboard_CommodityGroupFilial
+        where modifiedDate = @Monday
+        
+        delete from PlanRC.dbo.VZ_MSP_Dashboard_CommodityGroup
+        where modifiedDate = @Monday
+        
+        delete from PlanRC.dbo.VZ_MSP_Dashboard_Total
+        where modifiedDate = @Monday
+
+    '''
+    cursor.execute(query)
+    cursor.commit()
+
 
