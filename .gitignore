@@ -3,8 +3,12 @@ msp_dashboard_example/
 env/
 .idea
 src/__pycache__/
+build
+dist
+
 
 #files
 weights_shops_msp.xlsx
 sales_5550499_commodity_group.csv
 sales.csv
+src/resources/weights_shops_msp.xlsx

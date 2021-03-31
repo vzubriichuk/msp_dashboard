@@ -11,6 +11,7 @@ from datetime import date, datetime
 import db_connect_sql as conn
 import numpy as np
 import pandas as pd
+import time
 import xlrd
 
 start_script_time = datetime.now()
@@ -40,7 +41,7 @@ result_total = pd.DataFrame(
     columns=['EffectValue', 'DecisionValue', 'modifiedDate'])
 
 # Получение весов
-weights = pd.read_excel('weights_shops_msp.xlsx').set_index('index')
+weights = pd.read_excel('.\\resources\\weights_shops_msp.xlsx').set_index('index')
 
 pg_total_revenues = []
 cg_total_revenues = []
@@ -165,13 +166,13 @@ result_tg.to_sql(name=result_tg_name, con=conn.engine, if_exists='append',
 result_total.to_sql(name=result_total_name, con=conn.engine, if_exists='append',
                     index=False,
                     schema='dbo')
+time.sleep(5)
 print('5 of 5. End scripts')
 
-# print(result_tg_fil)
-# print(result_tg)
-# print(result_total)
 
 end_script_time = datetime.now()
 delta = end_script_time - start_script_time
 
+time.sleep(5)
 print('\n' 'Total time duration: ' + str(delta.seconds) + ' seconds')
+time.sleep(5)
