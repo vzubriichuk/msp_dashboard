@@ -91,4 +91,19 @@ def if_exists():
     cursor.execute(query)
     cursor.commit()
 
+def successful_update():
+    query = '''
+        DECLARE @to nvarchar(max) = 'analytics-logist@fozzy.ua',
 
+        @body nvarchar(max) = '
+        Задание: Расчет эффекта и статистического решения.
+        Статус: Обновление выполнено успешно.\n 
+        Автоматическое уведомление.\n'
+        
+        EXEC msdb.dbo.sp_send_dbmail
+        @recipients = @to,
+        @subject = '(Автоотчет) Ella Pilot MSP',
+        @body = @body
+    '''
+    cursor.execute(query)
+    cursor.commit()

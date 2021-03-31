@@ -150,6 +150,9 @@ result_total_name = 'VZ_MSP_Dashboard_Total'
 # Delete if dats exists
 conn.if_exists()
 
+# Happy end letter
+conn.successful_update()
+
 # Upload
 result_tg_fil.to_sql(name=result_tg_fil_name, con=conn.engine,
                      if_exists='append', index=False,
