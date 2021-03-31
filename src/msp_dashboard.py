@@ -23,6 +23,7 @@ print('1 of 5. Start load revenues')
 # sales = pd.read_csv('sales.csv')
 sales = pd.read_sql_query(conn.get_revenues(), conn.engine)
 commodity_groups = sales['commodityGroupId'].unique()
+date_update = pd.to_datetime(sales['createddate'].max()) + pd.Timedelta(days=1)
 
 print('2 of 5. End load revenues')
 
@@ -96,7 +97,7 @@ for tg in commodity_groups:
         _, p_value = mannwhitneyu(cg_pilot, pg_pilot,
                                   use_continuity=False, alternative='greater')
 
-        df = pd.DataFrame([[tg, pg_filial, effect, p_value, date.today()]],
+        df = pd.DataFrame([[tg, pg_filial, effect, p_value, date_update]],
                           columns=['commodityGroupId', 'Filid', 'EffectValue',
                                    'DecisionValue', 'modifiedDate'])
         result_tg_fil = result_tg_fil.append(df, ignore_index=True,
@@ -119,7 +120,7 @@ for tg in commodity_groups:
     _, p_value = mannwhitneyu(cg_daily_revenues, pg_daily_revenues,
                               use_continuity=False, alternative='greater')
 
-    df = pd.DataFrame([[tg, effect, p_value, date.today()]],
+    df = pd.DataFrame([[tg, effect, p_value, date_update]],
                       columns=['commodityGroupId', 'EffectValue',
                                'DecisionValue', 'modifiedDate'])
     result_tg = result_tg.append(df, ignore_index=True, verify_integrity=False,
@@ -133,7 +134,7 @@ effect = (pg_total_revenues.sum() / cg_total_revenues.sum()) - 1
 _, p_value = mannwhitneyu(cg_total_revenues, pg_total_revenues,
                           use_continuity=False, alternative='greater')
 
-result_total = pd.DataFrame([[effect, p_value, date.today()]],
+result_total = pd.DataFrame([[effect, p_value, date_update]],
                             columns=['EffectValue', 'DecisionValue',
                                      'modifiedDate'])
 
@@ -147,7 +148,7 @@ result_tg_fil_name = 'VZ_MSP_Dashboard_CommodityGroupFilial'
 result_tg_name = 'VZ_MSP_Dashboard_CommodityGroup'
 result_total_name = 'VZ_MSP_Dashboard_Total'
 
-# Delete if dats exists
+# Delete if data exists
 conn.if_exists()
 
 # Happy end letter
