@@ -93,7 +93,7 @@ def if_exists():
 
 def successful_update():
     query = '''
-        DECLARE @to nvarchar(max) = 'analytics-logist@fozzy.ua',
+        DECLARE @to nvarchar(max) = 'silpo-sql-oper@fozzy.ua',
 
         @body nvarchar(max) = '
         Задание: Расчет эффекта и статистического решения.

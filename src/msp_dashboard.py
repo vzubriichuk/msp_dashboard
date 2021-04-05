@@ -176,3 +176,4 @@ delta = end_script_time - start_script_time
 time.sleep(5)
 print('\n' 'Total time duration: ' + str(delta.seconds) + ' seconds')
 time.sleep(5)
+

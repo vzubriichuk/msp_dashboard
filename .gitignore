@@ -5,6 +5,7 @@ env/
 src/__pycache__/
 build
 dist
+.vscode
 
 
 #files
@@ -12,3 +13,4 @@ weights_shops_msp.xlsx
 sales_5550499_commodity_group.csv
 sales.csv
 src/resources/weights_shops_msp.xlsx
+Ella Pilot MSP.xlsb
