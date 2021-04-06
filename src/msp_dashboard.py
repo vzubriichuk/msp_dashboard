@@ -53,7 +53,6 @@ result_total = pd.DataFrame(
 
 # Получение весов
 weights = pd.read_excel(path_to_folder + '\\weights_shops_msp.xlsx').set_index('index')
-print(weights)
 
 pg_total_revenues = []
 cg_total_revenues = []
