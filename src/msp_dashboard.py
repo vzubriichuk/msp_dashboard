@@ -34,17 +34,21 @@ pg_filials = [1934, 2022, 2031, 2069, 2112, 2120, 2131, 2254, 2382, 2028, 1999]
 print('1 of 5. Start load revenues')
 # sales = pd.read_csv('sales.csv')
 sales = pd.read_sql_query(conn.get_revenues(), conn.engine)
+
 commodity_groups = sales['commodityGroupId'].unique()
 date_update = pd.to_datetime(sales['createddate'].max()) + pd.Timedelta(days=1)
-
 print('2 of 5. End load revenues')
 
 print('3 of 5. Data processing')
-
 # Датафреймы
 result_tg_fil = pd.DataFrame(
     columns=['commodityGroupId', 'Filid', 'EffectValue', 'DecisionValue',
              'modifiedDate'])
+result_fil_pg = pd.DataFrame(columns=['Revenue', 'Filid'])
+result_fil_cg = pd.DataFrame(columns=['Revenue', 'Filid'])
+result_fil_pv = pd.DataFrame(columns=['p_value', 'Filid'])
+result_fil = pd.DataFrame(columns=['Filid', 'EffectValue', 'DecisionValue',
+                                   'modifiedDate'])
 result_tg = pd.DataFrame(
     columns=['commodityGroupId', 'EffectValue', 'DecisionValue',
              'modifiedDate'])
@@ -52,7 +56,8 @@ result_total = pd.DataFrame(
     columns=['EffectValue', 'DecisionValue', 'modifiedDate'])
 
 # Получение весов
-weights = pd.read_excel(path_to_folder + '\\weights_shops_msp.xlsx').set_index('index')
+weights = pd.read_excel(path_to_folder + '\\weights_shops_msp.xlsx').set_index(
+    'index')
 
 pg_total_revenues = []
 cg_total_revenues = []
@@ -120,6 +125,25 @@ for tg in commodity_groups:
         pg_daily_revenues.append(pg_pilot)
         cg_daily_revenues.append(cg_pilot)
 
+        revenue_pg = np.array(pg_daily_revenues).flatten().sum()
+        revenue_cg = np.array(cg_daily_revenues).flatten().sum()
+
+        # Датафрейм для сбора пофилиальных доходов уровня ТГ-Филиал (PG)
+        df = pd.DataFrame([[revenue_pg, pg_filial]],
+                          columns=['Revenue', 'Filid'])
+
+        result_fil_pg = result_fil_pg.append(df, ignore_index=True,
+                                             verify_integrity=False,
+                                             sort=None)
+
+        # Датафрейм для сбора пофилиальных доходов уровня ТГ-Филиал (CG)
+        df = pd.DataFrame([[revenue_cg, pg_filial]],
+                          columns=['Revenue', 'Filid'])
+
+        result_fil_cg = result_fil_cg.append(df, ignore_index=True,
+                                             verify_integrity=False,
+                                             sort=None)
+
     # Аккумулируем дневную выручку на уровне всех ТГ
     pg_total_revenues.append(pg_daily_revenues)
     cg_total_revenues.append(cg_daily_revenues)
@@ -138,6 +162,41 @@ for tg in commodity_groups:
     result_tg = result_tg.append(df, ignore_index=True, verify_integrity=False,
                                  sort=None)
 
+# Группируем доходы по всем ТГ на уровне филиалов
+pg = pd.DataFrame(result_fil_pg.groupby(['Filid'], as_index=False).sum())
+cg = pd.DataFrame(result_fil_cg.groupby(['Filid'], as_index=False).sum())
+# pg.to_csv('revenue_pg.csv')
+# cg.to_csv('revenue_cg.csv')
+
+# Определяем эффект всех ТГ пофилиально
+filial_effect = pd.merge(pg, cg, how='left', on=['Filid'])
+filial_effect['Revenue'] = filial_effect.Revenue_x / filial_effect.Revenue_y - 1
+
+# Расчет стат.решения пофилиально (mannwhitneyu)
+for filial in pg_filials:
+    pg = pd.DataFrame(result_fil_pg.loc[result_fil_pg['Filid'] == filial])
+    p_value_fil_pg = np.array(pg['Revenue'])
+    cg = pd.DataFrame(result_fil_cg.loc[result_fil_cg['Filid'] == filial])
+    p_value_fil_cg = np.array(cg['Revenue'])
+
+    # расчет mannwhitneyu пофилиально
+    _, p_value = mannwhitneyu(p_value_fil_cg, p_value_fil_pg,
+                              use_continuity=False, alternative='greater')
+    # Собираем решения в датафрейм
+    df = pd.DataFrame([[p_value, filial]], columns=['p_value', 'Filid'])
+    result_fil_pv = result_fil_pv.append(df, ignore_index=True,
+                                         verify_integrity=False,
+                                         sort=None)
+
+# Джойним датафрейм решений к фрейму пофилиальных эффектов
+filial_df = pd.merge(filial_effect, result_fil_pv, how='left', on=['Filid'])
+
+# Итоговый фрейм эффекта и статистического решения пофилиально
+result_fil[['Filid', 'EffectValue', 'DecisionValue']] = filial_df[['Filid', 'Revenue', 'p_value']]
+result_fil[['modifiedDate']] = date_update
+
+# print(result_fil)
+
 pg_total_revenues = np.array(pg_total_revenues).flatten()
 cg_total_revenues = np.array(cg_total_revenues).flatten()
 
@@ -150,33 +209,36 @@ result_total = pd.DataFrame([[effect, p_value, date_update]],
                             columns=['EffectValue', 'DecisionValue',
                                      'modifiedDate'])
 
-
-
-
 print('4 of 5. Upload data to server')
-
 # Результирующие таблицы
 result_tg_fil_name = 'VZ_MSP_Dashboard_CommodityGroupFilial'
 result_tg_name = 'VZ_MSP_Dashboard_CommodityGroup'
+result_total_fil_name = 'VZ_MSP_Dashboard_Total_Filial'
 result_total_name = 'VZ_MSP_Dashboard_Total'
 
 # Delete if data exists
 conn.if_exists()
 
-# Happy end letter
-conn.successful_update()
-
-# Upload
-result_tg_fil.to_sql(name=result_tg_fil_name, con=conn.engine,
-                     if_exists='append', index=False,
+try:
+    # Upload
+    result_tg_fil.to_sql(name=result_tg_fil_name, con=conn.engine,
+                         if_exists='append', index=False,
+                         schema='dbo')
+    result_tg.to_sql(name=result_tg_name, con=conn.engine, if_exists='append',
+                     index=False,
                      schema='dbo')
-result_tg.to_sql(name=result_tg_name, con=conn.engine, if_exists='append',
-                 index=False,
-                 schema='dbo')
+    result_fil.to_sql(name=result_total_fil_name, con=conn.engine, if_exists='append',
+                        index=False,
+                        schema='dbo')
+    result_total.to_sql(name=result_total_name, con=conn.engine, if_exists='append',
+                        index=False,
+                        schema='dbo')
 
-result_total.to_sql(name=result_total_name, con=conn.engine, if_exists='append',
-                    index=False,
-                    schema='dbo')
+    # Happy end letter
+    conn.successful_update()
+except Exception:
+    conn.error_update()
+
 time.sleep(5)
 print('5 of 5. End scripts')
 
@@ -187,4 +249,5 @@ delta = end_script_time - start_script_time
 time.sleep(5)
 print('\n' 'Total time duration: ' + str(delta.seconds) + ' seconds')
 time.sleep(5)
+
 
