@@ -17,7 +17,6 @@ cursor = connection.cursor()
 
 
 def get_revenues():
-
     query = '''
         
         DECLARE @Today date = getdate()
@@ -44,6 +43,13 @@ def if_exists():
         
         delete from PlanRC.dbo.VZ_MSP_Dashboard_Total
         where modifiedDate = @Monday
+        
+        delete from PlanRC.dbo.VZ_MSP_Dashboard_Wave
+        where modifiedDate = @Monday
+
+        delete from PlanRC.dbo.VZ_MSP_Dashboard_FilialWave
+        where modifiedDate = @Monday
+
 
     '''
     cursor.execute(query)
@@ -51,13 +57,13 @@ def if_exists():
 
 def successful_update():
     query = '''
-        DECLARE @to nvarchar(max) = 'v.zubriichuk@fozzy.ua',
+        DECLARE @to nvarchar(max) = 'silpo-sql-oper@fozzy.ua',
 
         @body nvarchar(max) = '
         Задание: Расчет эффекта и статистического решения.
-        Статус: Обновление выполнено успешно.\n 
+        Статус: Обновление выполнено успешно.\n
         Автоматическое уведомление.\n'
-        
+
         EXEC msdb.dbo.sp_send_dbmail
         @recipients = @to,
         @subject = '(Автоотчет) Ella Pilot MSP',
@@ -69,7 +75,7 @@ def successful_update():
 
 def error_update():
     query = '''
-        DECLARE @to nvarchar(max) = 'v.zubriichuk@fozzy.ua',
+        DECLARE @to nvarchar(max) = 'silpo-sql-oper@fozzy.ua',
 
         @body nvarchar(max) = '
         Задание: Расчет эффекта и статистического решения.
@@ -78,7 +84,7 @@ def error_update():
 
         EXEC msdb.dbo.sp_send_dbmail
         @recipients = @to,
-        @subject = '(Автоотчет) Ella Pilot MSP',
+        @subject = '(Автоотчет) Ella Pilot MSP (ошибка)',
         @body = @body
     '''
     cursor.execute(query)
