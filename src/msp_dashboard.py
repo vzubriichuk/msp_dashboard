@@ -39,8 +39,9 @@ wave3 = [5550118, 5550150, 5550151, 5550499]
 
 # Выгрузка данных по чекам за период
 print('1 of 4. Start load revenues')
-# sales = pd.read_csv('sales_new_20210315.csv')
+# sales = pd.read_csv('sales_new_20210517.csv')
 sales = pd.read_sql_query(conn.get_revenues(), conn.engine)
+sales_basic = pd.read_csv(path_to_folder + '\\sales_basic_revenues.csv')
 commodity_groups = sales['commodityGroupId'].unique()
 
 # Определим кол-во активных волн в периоде
@@ -56,12 +57,12 @@ date_update = pd.to_datetime(sales['createddate'].max()) + pd.Timedelta(days=1)
 print('2 of 4. Data processing')
 # Датафреймы
 result_tg_fil = pd.DataFrame(columns=['commodityGroupId', 'Filid', 'EffectValue', 'DecisionValue', 'modifiedDate'])
-result_fil_pg = pd.DataFrame(columns=['Revenue', 'Filid'])
-result_fil_cg = pd.DataFrame(columns=['Revenue', 'Filid'])
+result_fil_pg = pd.DataFrame(columns=['Revenue', 'Revenue_b', 'Filid'])
+result_fil_cg = pd.DataFrame(columns=['Revenue', 'Revenue_b', 'Filid'])
 result_fil_pv = pd.DataFrame(columns=['p_value', 'Filid'])
 result_fil = pd.DataFrame(columns=['Filid', 'EffectValue', 'DecisionValue','modifiedDate'])
-result_fil_pg_wave = pd.DataFrame(columns=['Revenue', 'Filid', 'wave'])
-result_fil_cg_wave = pd.DataFrame(columns=['Revenue', 'Filid', 'wave'])
+result_fil_pg_wave = pd.DataFrame(columns=['Revenue', 'Revenue_b', 'Filid', 'wave'])
+result_fil_cg_wave = pd.DataFrame(columns=['Revenue', 'Revenue_b', 'Filid', 'wave'])
 result_fil_pv_wave = pd.DataFrame(columns=['p_value', 'Filid', 'wave'])
 result_fil_wave = pd.DataFrame(columns=['Filid', 'wave', 'EffectValue', 'DecisionValue','modifiedDate'])
 result_tg = pd.DataFrame(columns=['commodityGroupId', 'EffectValue', 'DecisionValue','modifiedDate'])
@@ -88,19 +89,28 @@ for tg in commodity_groups:
         wave = 3
 
     data_for_all_filials = sales[sales.commodityGroupId == tg].copy(deep=True)
-    data_for_all_filials['createddate'] = pd.to_datetime(
-        data_for_all_filials['createddate'])
-
+    data_for_all_filials['createddate'] = pd.to_datetime(data_for_all_filials['createddate'])
     start_pilot = pd.to_datetime('2021-03-08')
     pilot = data_for_all_filials[data_for_all_filials['createddate'] >= start_pilot]
     end_pilot = pilot.createddate.max()
     time_series_pilot = pilot.groupby(['filid', 'createddate']).sum()
-    filials = np.unique(data_for_all_filials.filid)
-    candidate_for_cg_filials = filials[~np.isin(filials, pg_filials)]
     time_series_pivoted = pd.DataFrame(columns=['dates_pilot', 'time_series_pilot'])
 
+    # Для определения выручки базового периода
+    data_for_all_filials_b = sales_basic[sales_basic.commodityGroupId == tg].copy(deep=True)
+    data_for_all_filials_b['createddate'] = pd.to_datetime(data_for_all_filials_b['createddate'])
+    pilot_b = data_for_all_filials_b
+    start_pilot_b = pilot_b.createddate.min()
+    end_pilot_b = pilot_b.createddate.max()
+    time_series_pilot_b = pilot_b.groupby(['filid', 'createddate']).sum()
+    time_series_pivoted_b = pd.DataFrame(columns=['dates_pilot_b', 'time_series_pilot_b'])
+
+    filials = np.unique(data_for_all_filials.filid)
+
+    # Выручка текущего периода
     for filid in filials:
         y = time_series_pilot.loc[filid]['sum_revenues']
+
         y = pd.DataFrame(pd.date_range(start=start_pilot, end=end_pilot),
                          columns=['createddate']).merge(y.reset_index(),
                                                         how='left').set_index(
@@ -108,16 +118,32 @@ for tg in commodity_groups:
 
         time_series_pivoted.loc[filid, 'time_series_pilot'] = np.array(y)
         time_series_pivoted.loc[filid, 'dates_pilot'] = np.array(y.index)
+
+    # Выручка базового периода
+    for filid in filials:
+        y = time_series_pilot_b.loc[filid]['sum_revenues']
+        y = pd.DataFrame(pd.date_range(start=start_pilot_b, end=end_pilot_b),
+                         columns=['createddate']).merge(y.reset_index(),
+                                                        how='left').set_index(
+            'createddate')['sum_revenues'].fillna(0)
+
+        time_series_pivoted_b.loc[filid, 'time_series_pilot_b'] = np.array(y)
+        time_series_pivoted_b.loc[filid, 'dates_pilot_b'] = np.array(y.index)
+
+    # Указываем веса филиалов для конкретной ТГ
     weights_commodity_group = weights[weights.commodity_group == tg].fillna(
         0).to_dict()
 
-    # Подсчет выручек для синтетических контрольных магазинов
+    # Подсчет выручек для контрольных магазинов
     pg_daily_revenues = []
     cg_daily_revenues = []
+    pg_daily_revenues_b = []
+    cg_daily_revenues_b = []
 
     for pg_filial in pg_filials:
         w = weights_commodity_group[pg_filial]
         values = []
+        values_basic = []
         for k, v in w.items():
             values.append(
                 time_series_pivoted['time_series_pilot'].to_dict()[k] * v)
@@ -125,12 +151,25 @@ for tg in commodity_groups:
         cg_pilot = np.vstack(values).sum(axis=0)
         pg_pilot = time_series_pivoted['time_series_pilot'].to_dict()[pg_filial]
 
+        for k, v in w.items():
+            values_basic.append(
+                time_series_pivoted_b['time_series_pilot_b'].to_dict()[k] * v)
+
+        cg_pilot_b = np.vstack(values_basic).sum(axis=0)
+        pg_pilot_b = time_series_pivoted_b['time_series_pilot_b'].to_dict()[pg_filial]
+
         # Аккумулируем дневную выручку филиалов
         pg_daily_revenues.append(pg_pilot)
         cg_daily_revenues.append(cg_pilot)
+        pg_daily_revenues_b.append(pg_pilot_b)
+        cg_daily_revenues_b.append(cg_pilot_b)
+
+        # Определение динамических значений ПГ и КГ на уровне ТГ-Филиал
+        pg_dynamic = pg_pilot.sum() / pg_pilot_b.sum()
+        cg_dynamic = cg_pilot.sum() / cg_pilot_b.sum()
 
         # Подсчет эффекта и статистического решения на уровне ТГ-Филиал
-        effect = (pg_pilot.sum() / cg_pilot.sum()) - 1
+        effect = ((pg_dynamic - cg_dynamic) / cg_dynamic)
         _, p_value = mannwhitneyu(cg_pilot, pg_pilot,
                                   use_continuity=False, alternative='greater')
 
@@ -143,29 +182,31 @@ for tg in commodity_groups:
 
         revenue_pg = pg_pilot.sum()
         revenue_cg = cg_pilot.sum()
+        revenue_pg_b = pg_pilot_b.sum()
+        revenue_cg_b = cg_pilot_b.sum()
 
         # Сбор пофлиальных доходов для уровня всех ТГ-Филиал (PG)
-        df = pd.DataFrame([[revenue_pg, pg_filial]],
-                          columns=['Revenue', 'Filid'])
+        df = pd.DataFrame([[revenue_pg, revenue_pg_b, pg_filial]],
+                          columns=['Revenue', 'Revenue_b', 'Filid'])
         result_fil_pg = result_fil_pg.append(df, ignore_index=True,
                                              verify_integrity=False,
                                              sort=None)
 
         # Сбор пофилиальных доходов для уровня всех ТГ-Филиал (CG)
-        df = pd.DataFrame([[revenue_cg, pg_filial]],
-                          columns=['Revenue', 'Filid'])
+        df = pd.DataFrame([[revenue_cg, revenue_cg_b, pg_filial]],
+                          columns=['Revenue', 'Revenue_b', 'Filid'])
         result_fil_cg = result_fil_cg.append(df, ignore_index=True,
                                              verify_integrity=False,
                                              sort=None)
         # Сбор пофилиальных доходов уровня все ТГ волны-Филиал (PG)
-        df = pd.DataFrame([[revenue_pg, pg_filial, wave]],
-                          columns=['Revenue', 'Filid', 'wave'])
+        df = pd.DataFrame([[revenue_pg, revenue_pg_b, pg_filial, wave]],
+                          columns=['Revenue', 'Revenue_b', 'Filid', 'wave'])
         result_fil_pg_wave = result_fil_pg_wave.append(df, ignore_index=True,
                                              verify_integrity=False,
                                              sort=None)
         # Сбор пофилиальных доходов уровня все ТГ волны-Филиал (CG)
-        df = pd.DataFrame([[revenue_cg, pg_filial, wave]],
-                          columns=['Revenue', 'Filid', 'wave'])
+        df = pd.DataFrame([[revenue_cg, revenue_cg_b, pg_filial, wave]],
+                          columns=['Revenue', 'Revenue_b', 'Filid', 'wave'])
         result_fil_cg_wave = result_fil_cg_wave.append(df, ignore_index=True,
                                              verify_integrity=False,
                                              sort=None)
@@ -173,9 +214,16 @@ for tg in commodity_groups:
     # Аккумулируем дневную выручку филиалов на уровне ТГ
     pg_daily_revenues = np.array(pg_daily_revenues).flatten()
     cg_daily_revenues = np.array(cg_daily_revenues).flatten()
-    #
+
+    pg_daily_revenues_b = np.array(pg_daily_revenues_b).flatten()
+    cg_daily_revenues_b = np.array(cg_daily_revenues_b).flatten()
+
+    # Определение динамических значений ПГ и КГ на уровне ТГ-Филиал
+    pg_dynamic_b = pg_daily_revenues.sum() / pg_daily_revenues_b.sum()
+    cg_dynamic_b = cg_daily_revenues.sum() / cg_daily_revenues_b.sum()
+
     # Подсчет эффекта и статистического решения на уровне ТГ
-    effect = (pg_daily_revenues.sum() / cg_daily_revenues.sum()) - 1
+    effect = ((pg_dynamic_b - cg_dynamic_b) / cg_dynamic_b)
     _, p_value = mannwhitneyu(cg_daily_revenues, pg_daily_revenues,
                               use_continuity=False, alternative='greater')
 
@@ -188,31 +236,40 @@ for tg in commodity_groups:
 # Группируем доходы по всем ТГ на уровне филиалов
 pg = pd.DataFrame(result_fil_pg.groupby(['Filid'], as_index=False).sum())
 cg = pd.DataFrame(result_fil_cg.groupby(['Filid'], as_index=False).sum())
-pg.to_csv('revenue_pg.csv')
-cg.to_csv('revenue_cg.csv')
+# pg.to_csv('revenue_pg.csv')
+# cg.to_csv('revenue_cg.csv')
+
 # Определяем эффект всех ТГ пофилиально
 filial_effect = pd.merge(pg, cg, how='left', on=['Filid'])
-filial_effect['Revenue'] = filial_effect.Revenue_x / filial_effect.Revenue_y - 1
+filial_effect['pg_dynamic'] = filial_effect.Revenue_x / filial_effect.Revenue_b_x
+filial_effect['cg_dynamic'] = filial_effect.Revenue_y / filial_effect.Revenue_b_y
+filial_effect['Effect'] = (filial_effect.pg_dynamic - filial_effect.cg_dynamic) / filial_effect.cg_dynamic
 
 # Группируем доходы по всем ТГ на уровне филиалов (по волнам)
 pg_wave = pd.DataFrame(result_fil_pg_wave.groupby(['Filid', 'wave'], as_index=False).sum())
 cg_wave = pd.DataFrame(result_fil_cg_wave.groupby(['Filid', 'wave'], as_index=False).sum())
-pg_wave.to_csv('revenue_pg_wave.csv')
-cg_wave.to_csv('revenue_cg_wave.csv')
+# pg_wave.to_csv('revenue_pg_wave.csv')
+# cg_wave.to_csv('revenue_cg_wave.csv')
+
 # Определяем эффект всех ТГ пофилиально (по волнам)
 filial_effect_wave = pd.merge(pg_wave, cg_wave, how='left', on=['Filid', 'wave'])
-filial_effect_wave['Revenue'] = filial_effect_wave.Revenue_x / filial_effect_wave.Revenue_y - 1
-filial_effect_wave.to_csv('filial_effect_wave.csv')
+filial_effect_wave['pg_dynamic'] = filial_effect_wave.Revenue_x / filial_effect_wave.Revenue_b_x
+filial_effect_wave['cg_dynamic'] = filial_effect_wave.Revenue_y / filial_effect_wave.Revenue_b_y
+filial_effect_wave['Effect'] = (filial_effect_wave.pg_dynamic - filial_effect_wave.cg_dynamic) / filial_effect_wave.cg_dynamic
+# filial_effect_wave.to_csv('filial_effect_wave.csv')
 
 # Группируем доходы по всем ТГ тотал (по волнам)  - нужно исклюить из тотала 2 филиала
-pg_wave_total = result_fil_pg_wave.where((result_fil_pg_wave.Filid != 1934) & (result_fil_pg_wave.Filid != 2112)).groupby(by=['wave'], as_index=False)['Revenue'].sum()
-cg_wave_total = result_fil_cg_wave.where((result_fil_cg_wave.Filid != 1934) & (result_fil_cg_wave.Filid != 2112)).groupby(by=['wave'], as_index=False)['Revenue'].sum()
-pg_wave_total.to_csv('revenue_pg_total_wave.csv')
-cg_wave_total.to_csv('revenue_cg_total_wave.csv')
+pg_wave_total = result_fil_pg_wave.where((result_fil_pg_wave.Filid != 1934) & (result_fil_pg_wave.Filid != 2112)).groupby(by=['wave'], as_index=False)[['Revenue', 'Revenue_b']].sum()
+cg_wave_total = result_fil_cg_wave.where((result_fil_cg_wave.Filid != 1934) & (result_fil_cg_wave.Filid != 2112)).groupby(by=['wave'], as_index=False)[['Revenue', 'Revenue_b']].sum()
+# pg_wave_total.to_csv('revenue_pg_total_wave.csv')
+# cg_wave_total.to_csv('revenue_cg_total_wave.csv')
+
 # Определяем эффект всех ТГ тотал (по волнам)
 effect_total_wave = pd.merge(pg_wave_total, cg_wave_total, how='left', on=['wave'])
-effect_total_wave['Revenue'] = effect_total_wave.Revenue_x / effect_total_wave.Revenue_y - 1
-effect_total_wave.to_csv('filial_effect_total_wave.csv')
+effect_total_wave['pg_dynamic'] = effect_total_wave.Revenue_x / effect_total_wave.Revenue_b_x
+effect_total_wave['cg_dynamic'] = effect_total_wave.Revenue_y / effect_total_wave.Revenue_b_y
+effect_total_wave['Effect'] = (effect_total_wave.pg_dynamic - effect_total_wave.cg_dynamic) / effect_total_wave.cg_dynamic
+# effect_total_wave.to_csv('filial_effect_total_wave.csv')
 
 # Проверка расчета решения для филиала
 # print(pd.DataFrame(result_fil_pg.loc[result_fil_pg['Filid'] == 2031]))
@@ -243,35 +300,11 @@ for pg_filial in pg_filials:
 # Джойним датафрейм решений к фрейму пофилиальных эффектов
 filial_df = pd.merge(filial_effect, result_fil_pv, how='left', on=['Filid'])
 # Итоговый фрейм эффекта и статистического решения пофилиально
-result_fil[['Filid', 'EffectValue', 'DecisionValue']] = filial_df[['Filid', 'Revenue', 'p_value']]
+result_fil[['Filid', 'EffectValue', 'DecisionValue']] = filial_df[['Filid', 'Effect', 'p_value']]
 result_fil[['modifiedDate']] = date_update
 # print(result_fil)
 
-# Проверка расчета пофилиального по волнам стат.решения
-# pg = pd.DataFrame(result_fil_pg_wave.loc[(result_fil_pg_wave['Filid'] == 2131) & (result_fil_pg_wave['wave'] == 1)])
-# p_value_fil_pg_wave = np.array(pg['Revenue'])
-# print(p_value_fil_pg_wave)
-# cg = pd.DataFrame(result_fil_cg_wave.loc[(result_fil_cg_wave['Filid'] == 2131) & (result_fil_cg_wave['wave'] == 1)])
-# p_value_fil_cg_wave = np.array(cg['Revenue'])
-# print(p_value_fil_cg_wave)
-# _, p_value = mannwhitneyu(p_value_fil_cg_wave, p_value_fil_pg_wave,
-#                                   use_continuity=False, alternative='greater')
-# print('Проверка расчета пофилиального по волнам стат.решения')
-# print(p_value)
-#
-# pg = pd.DataFrame(result_fil_pg_wave.loc[(result_fil_pg_wave['Filid'] == 2131) & (result_fil_pg_wave['wave'] == 2)])
-# p_value_fil_pg_wave = np.array(pg['Revenue'])
-# print(p_value_fil_pg_wave.sum())
-# cg = pd.DataFrame(result_fil_cg_wave.loc[(result_fil_cg_wave['Filid'] == 2131) & (result_fil_cg_wave['wave'] == 2)])
-# p_value_fil_cg_wave = np.array(cg['Revenue'])
-# print(p_value_fil_cg_wave.sum())
-# _, p_value = mannwhitneyu(p_value_fil_cg_wave, p_value_fil_pg_wave,
-#                                   use_continuity=False, alternative='greater')
-# print('Проверка расчета пофилиального по волнам стат.решения')
-# print(p_value)
-
 # Расчет стат.решения (mannwhitneyu) пофилиально (по волнам)
-
 for wave in range(1, cnt_active_wave + 1):
     for pg_filial in pg_filials:
         pg = pd.DataFrame(result_fil_pg_wave.loc[
@@ -295,7 +328,7 @@ for wave in range(1, cnt_active_wave + 1):
 # Джойним фрейм решений к фрейму пофилиальных эффектов (по волнам)
 filial_df_wave = pd.merge(filial_effect_wave, result_fil_pv_wave, how='left', on=['Filid', 'wave'])
 # Итоговый фрейм эффекта и статистического решения пофилиально (по волнам)
-result_fil_wave[['Filid', 'wave', 'EffectValue', 'DecisionValue']] = filial_df_wave[['Filid', 'wave','Revenue', 'p_value']]
+result_fil_wave[['Filid', 'wave', 'EffectValue', 'DecisionValue']] = filial_df_wave[['Filid', 'wave','Effect', 'p_value']]
 result_fil_wave[['modifiedDate']] = date_update
 # print(result_fil_wave)
 
@@ -320,28 +353,28 @@ for wave in range(1, cnt_active_wave + 1):
 # Джойним фрейм решений к фрейму пофилиальных (по волнам)
 df_wave = pd.merge(effect_total_wave, result_total_wave_pv, how='left', on=['wave'])
 # Итоговый фрейм эффекта и статистического решения (по волнам)
-result_total_wave[['wave', 'EffectValue', 'DecisionValue']] = df_wave[['wave','Revenue', 'p_value']]
+result_total_wave[['wave', 'EffectValue', 'DecisionValue']] = df_wave[['wave','Effect', 'p_value']]
 result_total_wave[['modifiedDate']] = date_update
 # print(result_total_wave)
 
 # Подсчет эффекта и статистического решения на уровне всех ТГ (за минусом двух филиалов)
-pg_total = result_fil_pg.where((result_fil_pg.Filid != 1934) & (result_fil_pg.Filid != 2112))['Revenue'].sum()
-cg_total = result_fil_cg.where((result_fil_cg.Filid != 1934) & (result_fil_cg.Filid != 2112))['Revenue'].sum()
+pg_total = result_fil_pg.where((result_fil_pg.Filid != 1934) & (result_fil_pg.Filid != 2112))[['Revenue', 'Revenue_b']].sum()
+cg_total = result_fil_cg.where((result_fil_cg.Filid != 1934) & (result_fil_cg.Filid != 2112))[['Revenue', 'Revenue_b']].sum()
+
+pg_total['pg_dynamic'] = pg_total.Revenue / pg_total.Revenue_b
+pg_total['cg_dynamic'] = cg_total.Revenue / cg_total.Revenue_b
 
 pg_total_revenues = pd.DataFrame(result_fil_pg.where((result_fil_pg.Filid != 1934) & (result_fil_pg.Filid != 2112)).groupby(by=['Filid'], as_index=False)['Revenue'].sum())
 cg_total_revenues = pd.DataFrame(result_fil_cg.where((result_fil_cg.Filid != 1934) & (result_fil_cg.Filid != 2112)).groupby(by=['Filid'], as_index=False)['Revenue'].sum())
-# print(np.array(cg_total_revenues['Revenue']).flatten())
-pg_total_revenues.to_csv('1pg.csv')
-cg_total_revenues.to_csv('1cg.csv')
 
-effect = (pg_total / cg_total) - 1
+effect = (pg_total.pg_dynamic - pg_total.cg_dynamic) / pg_total.cg_dynamic
 _, p_value = mannwhitneyu(np.array(cg_total_revenues['Revenue']).flatten(), np.array(pg_total_revenues['Revenue']).flatten(),
                           use_continuity=False, alternative='greater')
 
 result_total = pd.DataFrame([[effect, p_value, date_update]],
                             columns=['EffectValue', 'DecisionValue',
                                      'modifiedDate'])
-# print(result_total)
+
 print('3 of 4. Upload data to server')
 # Результирующие таблицы
 result_tg_fil_name = 'VZ_MSP_Dashboard_CommodityGroupFilial'

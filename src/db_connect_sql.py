@@ -29,7 +29,7 @@ def get_revenues():
 def if_exists():
     query = '''
 
-        declare @Today date =  getdate()
+        declare @Today date = getdate()
         declare @Monday date = (select dateadd(day, 1-datepart(weekday, @Today), @Today))
 
         delete from PlanRC.dbo.VZ_MSP_Dashboard_CommodityGroupFilial
